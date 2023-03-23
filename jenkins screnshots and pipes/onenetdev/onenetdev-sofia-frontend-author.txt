@@ -1,0 +1,40 @@
+https://github.com/HeliasEurodyn/sofia-author-frontend/
+H/15 * * * *
+
+
+
+def remote = [:]
+remote.name = 'onenetdev'
+remote.host = 'onenet-ngsi-ld-dev-server.eurodyn.com'
+remote.allowAnyHosts = true
+node
+{
+    stage("Clone From GIT")
+    {
+        git branch: 'development',
+            url: 'https://{token}@github.com/HeliasEurodyn/sofia-author-frontend.git'
+    }
+    stage("Build")
+    {
+    nodejs('NodeJs') {
+            sh 'npm install --save-dev @angular-devkit/build-angular --legacy-peer-deps'
+            sh 'npm --version'
+            sh 'node --version'
+            sh 'npm update --legacy-peer-deps'
+            sh 'ng config -g cli.warnings.versionMismatch false'
+            sh 'ng build --no-aot --no-build-optimizer --base-href ./ --configuration production'
+        }
+    }
+    stage("Deploy")
+        {
+            withCredentials([usernamePassword(credentialsId: 'onenetdev', usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD')])
+            {
+                remote.user = USERNAME
+                remote.password = PASSWORD
+                sshCommand remote: remote, command: "cd /home/ed/onenet_for_jenkins/frontend-author-container;docker-compose down"
+                sshRemove remote: remote, path: '/home/ed/onenet_for_jenkins/frontend-author-container/sofia-frontend-author/dist'
+                sshPut remote: remote, from: './dist', into: '/home/ed/onenet_for_jenkins/frontend-author-container/sofia-frontend-author/'
+                sshCommand remote: remote, command: "cd /home/ed/onenet_for_jenkins/frontend-author-container;docker-compose up --build -d"
+            }
+        }
+}

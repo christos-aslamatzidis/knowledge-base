@@ -1,0 +1,51 @@
+https://github.com/HeliasEurodyn/sofia-frontend/
+H/15 * * * *
+
+def remote = [:]
+remote.name = 'bd4nrg'
+remote.host = 'bd4nrg-dapb-server.eurodyn.com'
+remote.allowAnyHosts = true
+node
+{
+    try{
+        stage("Clone From GIT")
+        {
+            git branch: 'development',
+            url: 'https://{token}@github.com/HeliasEurodyn/sofia-frontend.git'
+        }
+        stage("Build")
+        {
+            nodejs('NodeJs') {
+                sh 'npm install --save-dev @angular-devkit/build-angular --legacy-peer-deps'
+                sh 'npm --version'
+                sh 'node --version'
+                sh 'npm update --legacy-peer-deps'
+                sh 'ng config -g cli.warnings.versionMismatch false'
+                sh 'ng build --no-aot --no-build-optimizer --base-href ./ --configuration production'
+            }
+        }
+        stage("Deploy")
+        {
+            withCredentials([usernamePassword(credentialsId: 'bd4nrg', usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD')])
+            {
+                remote.user = USERNAME
+                remote.password = PASSWORD
+                sshCommand remote: remote, command: "cd /home/bd4nrg/frontend-container;docker compose down"
+                sshRemove remote: remote, path: '/home/bd4nrg/frontend-container/sofia-frontend/dist'
+                sshPut remote: remote, from: './dist', into: '/home/bd4nrg/frontend-container/sofia-frontend/'
+                sshCommand remote: remote, command: "cd /home/bd4nrg/frontend-container;docker compose up --build -d"
+            }
+        } 
+        
+        emailext body: '$PROJECT_NAME - Build # $BUILD_NUMBER - SUCESSS: <br> Check console output at $BUILD_URL to view the results.',
+                 subject: '$PROJECT_NAME - Build # $BUILD_NUMBER - SUCESSS!', 
+                 to: '$DEFAULT_RECIPIENTS'
+        
+    }catch(e){
+        
+        emailext body: '$PROJECT_NAME - Build # $BUILD_NUMBER - ERROR: <br> Check console output at $BUILD_URL to view the results.',
+                 subject: '$PROJECT_NAME - Build # $BUILD_NUMBER - ERROR!', 
+                 to: '$DEFAULT_RECIPIENTS'
+    }
+    
+}

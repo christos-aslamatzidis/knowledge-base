@@ -1,0 +1,64 @@
+https://github.com/HeliasEurodyn/sofia-author/
+H/15 * * * *
+
+def remote = [:]
+remote.name = 'onenetdev'
+remote.host = 'onenet-ngsi-ld-dev-server.eurodyn.com'
+remote.allowAnyHosts = true
+node
+{
+    try{
+        stage 'Clone the project'
+        git branch: 'development',
+        url: 'https://{token}@github.com/HeliasEurodyn/sofia-author.git'
+        dir('')
+        {
+            stage("Build")
+            {
+                sh "chmod +x mvnw"
+                sh "./mvnw clean install -DskipTests"
+            }
+            stage("Run Unit Tests")
+            {
+                try {
+                    sh "./mvnw test -Dtest=!com.crm.sofia.integration.**  site -DgenerateReports=false"
+                } catch(err) {
+                    throw err
+                }
+            }
+           stage('SonarQube analysis') {
+               def scannerHome = tool name:'SonarQubeScanner', type: 'hudson.plugins.sonar.SonarRunnerInstallation';
+               def project_name ='sofia-author-backend-dev';
+               withSonarQubeEnv('sonarQube') {
+                    sh "${scannerHome}/bin/sonar-scanner -Dsonar.projectKey=${project_name}  -Dsonar.java.binaries=./target/classes"
+                }
+            }
+            stage("Deploy")
+            {
+                withCredentials([usernamePassword(credentialsId: 'onenetdev', usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD')])
+                {
+                    remote.user = USERNAME
+                    remote.password = PASSWORD
+                    sshCommand remote: remote, command: "cd /home/ed/onenet_for_jenkins/backend-author-container;docker-compose down"
+                    sshRemove remote: remote, path: '/home/ed/onenet_for_jenkins/backend-author-container/sofia-backend-author/sofia-0.0.1.jar'
+                    sshPut remote: remote, from: './target/sofia-0.0.1.jar', into: '/home/ed/onenet_for_jenkins/backend-author-container/sofia-backend-author/'
+                    sshRemove remote: remote, path: '/home/ed/onenet_for_jenkins/backend-author-container/sofia-backend-author/site/'
+                    sshCommand remote: remote, command: 'mkdir /home/ed/onenet_for_jenkins/backend-author-container/sofia-backend-author/site'   
+                    sshPut remote: remote, from: './target/site/.', into: '/home/ed/onenet_for_jenkins/backend-author-container/sofia-backend-author/'
+                    sshCommand remote: remote, command: "cd /home/ed/onenet_for_jenkins/backend-author-container;docker-compose up --build -d"
+                }
+            }
+            
+            emailext attachLog: true,
+                     body: '$PROJECT_NAME - Build # $BUILD_NUMBER - SUCESSS: <br> Check console output at $BUILD_URL to view the results.',
+                     subject: '$PROJECT_NAME - Build # $BUILD_NUMBER - SUCESSS!', 
+                     to: '$DEFAULT_RECIPIENTS'
+        }
+    }catch(e){
+            emailext body: '$PROJECT_NAME - Build # $BUILD_NUMBER - ERROR: <br> Check console output at $BUILD_URL to view the results.',
+                     subject: '$PROJECT_NAME - Build # $BUILD_NUMBER - ERROR!', 
+                     to: '$DEFAULT_RECIPIENTS'
+        
+    }
+    
+}

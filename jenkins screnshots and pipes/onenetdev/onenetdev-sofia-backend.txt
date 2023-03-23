@@ -1,0 +1,40 @@
+https://github.com/HeliasEurodyn/sofia/
+H/15 * * * *
+
+def remote = [:]
+remote.name = 'onenetdev'
+remote.host = 'onenet-ngsi-ld-dev-server.eurodyn.com'
+remote.allowAnyHosts = true
+node{
+    stage 'Clone the project'
+    git branch: 'development',
+    url: 'https://{token}@github.com/HeliasEurodyn/sofia.git'
+    dir('')
+    {
+        stage("Build")
+        {
+            sh "chmod +x mvnw"
+            sh "./mvnw clean install -DskipTests"
+        }
+        stage("Run Unit Tests")
+        {
+            try {
+                sh "./mvnw test"
+            } catch(err) {
+                throw err
+            }
+        }
+        stage("Deploy")
+        {
+            withCredentials([usernamePassword(credentialsId: 'onenetdev', usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD')])
+            {
+                remote.user = USERNAME
+                remote.password = PASSWORD
+                sshCommand remote: remote, command: "cd /home/ed/onenet_for_jenkins/backend-container;docker-compose down"
+                sshRemove remote: remote, path: '/home/ed/onenet_for_jenkins/backend-container/sofia-backend/sofia-0.0.1.jar'
+                sshPut remote: remote, from: './target/sofia-0.0.1.jar', into: '/home/ed/onenet_for_jenkins/backend-container/sofia-backend/'
+                sshCommand remote: remote, command: "cd /home/ed/onenet_for_jenkins/backend-container;docker-compose up --build -d"
+            }
+        }
+    }
+}
